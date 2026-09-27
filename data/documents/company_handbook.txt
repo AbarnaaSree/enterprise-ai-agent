@@ -1,0 +1,25 @@
+Enterprise AI Company Handbook
+
+Annual Leave Policy
+
+Full-time employees are eligible for 18 days of annual leave per calendar year.
+
+Employees should submit planned leave requests at least 3 working days before the intended leave date.
+
+Emergency leave can be requested without the normal advance notice requirement.
+
+Leave requests are subject to manager approval.
+
+Work From Home Policy
+
+Employees may work from home up to 2 days per week, subject to team requirements and manager approval.
+
+Employees working remotely must remain available during their assigned working hours.
+
+Information Security Policy
+
+Employees must not share company confidential information with external parties.
+
+Company credentials must never be stored in plain text or shared with other employees.
+
+Sensitive company data should only be accessed through authorized systems.
