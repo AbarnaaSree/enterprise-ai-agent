@@ -36,8 +36,16 @@ class RetrieverService:
         )
 
     @observe(name="rag_retrieval", as_type="retriever")
-    def retrieve(self, question: str, top_k: int = 5, distance_threshold: float = 1.4):
-        results = self.vector_store.similarity_search_with_score(question, k=top_k)
+    def retrieve(
+        self,
+        question: str,
+        top_k: int = 5,
+        distance_threshold: float = 1.4,
+    ):
+        results = self.vector_store.similarity_search_with_score(
+            question,
+            k=top_k,
+        )
 
         filtered_results = []
 
@@ -54,7 +62,10 @@ class RetrieverService:
                 "Distance:",
                 float(score),
             )
-            print("Content:", document.page_content[:300])
+            print(
+                "Content:",
+                document.page_content[:300],
+            )
             print("---")
 
             if score <= distance_threshold:
@@ -67,4 +78,12 @@ class RetrieverService:
 
         print("Filtered chunks:", len(filtered_results))
 
-        return filtered_results
+        return {
+            "documents": filtered_results,
+            "total_retrieved": len(results),
+            "filtered_count": len(filtered_results),
+            "top_k": top_k,
+            "distance_threshold": distance_threshold,
+            "embedding_model": "all-MiniLM-L6-v2",
+            "vector_store": "FAISS",
+        }

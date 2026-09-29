@@ -11,7 +11,7 @@ question = (
 )
 
 
-answer = agent.ask(
+result = agent.run_for_evaluation(
     question
 )
 
@@ -19,5 +19,25 @@ answer = agent.ask(
 print("\nQuestion:")
 print(question)
 
+print("\nExecution Steps:")
+print(result["execution_steps"])
+
+print("\nRoute:")
+print(result["route"])
+
 print("\nAnswer:")
-print(answer)
+print(result["answer"])
+print("\nQuestion:")
+print(question)
+
+print("\nExecution Steps:")
+print(result["execution_steps"])
+
+print("\nRoute:")
+print(result["route"])
+
+print("\nWorkflow:")
+print(result["workflow"])
+
+print("\nAnswer:")
+print(result["answer"])

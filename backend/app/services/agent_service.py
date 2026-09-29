@@ -7,7 +7,11 @@ from langgraph.graph import (
     START,
     END,
 )
-from langfuse import observe, propagate_attributes
+from langfuse import (
+    observe,
+    propagate_attributes,
+    get_client,
+)
 
 from backend.app.services.retriever_service import (
     RetrieverService,
@@ -40,6 +44,8 @@ class AgentState(TypedDict):
     employee_data: dict
     employee_name: str | None
     rag_query: str | None
+    execution_steps: list[str]
+    workflow: dict
 
 
 class AgentService:
@@ -59,12 +65,20 @@ class AgentService:
         state: AgentState,
     ) -> AgentState:
 
+        state["execution_steps"].append("validate")
+
         answer = state["answer"]
 
         validation = self.response_validator.validate(
             answer,
             state,
         )
+        state["workflow"]["validation"] = {
+            "status": "completed",
+            "valid": validation["valid"],
+            "errors": validation.get("errors", []),
+            "warnings": validation.get("warnings", []),
+        }
 
         if not validation["valid"]:
             answer = (
@@ -81,6 +95,8 @@ class AgentService:
         self,
         state: AgentState,
     ) -> AgentState:
+
+        state["execution_steps"].append("router")
 
         question = state["question"]
 
@@ -158,6 +174,15 @@ User question:
         else:
             route = "direct"
 
+        state["workflow"]["router"] = {
+            "status": "completed",
+            "route": route,
+            "needs_rag": decision.needs_rag,
+            "needs_database": decision.needs_database,
+            "employee_name": decision.employee_name,
+            "rag_query": decision.rag_query,
+        }
+
         return {
             **state,
             "route": route,
@@ -170,21 +195,34 @@ User question:
         state: AgentState,
     ) -> AgentState:
 
+        state["execution_steps"].append("retrieve")
+
         question = (
             state.get("rag_query")
             or state["question"]
         )
 
-        documents = (
-            self.retriever_service.retrieve(
-                question
-            )
+        rag_result = self.retriever_service.retrieve(
+            question
         )
+
+        documents = rag_result["documents"]
 
         context = "\n\n".join(
             result["document"].page_content
             for result in documents
         )
+
+        state["workflow"]["rag"] = {
+            "status": "completed",
+            "query": question,
+            "embedding_model": rag_result["embedding_model"],
+            "vector_store": rag_result["vector_store"],
+            "top_k": rag_result["top_k"],
+            "distance_threshold": rag_result["distance_threshold"],
+            "chunks_retrieved": rag_result["total_retrieved"],
+            "chunks_after_filter": rag_result["filtered_count"],
+        }
 
         return {
             **state,
@@ -194,6 +232,8 @@ User question:
         self,
         state: AgentState,
     ) -> AgentState:
+
+        state["execution_steps"].append("database")
 
         question = state["question"]
 
@@ -215,6 +255,12 @@ User question:
         employee_data = self.mcp_client.get_employee(
             employee_name
         )
+        state["workflow"]["mcp"] = {
+            "status": "completed",
+            "tool": "get_employee",
+            "employee_name": employee_name,
+            "found": employee_data.get("found", False),
+        }
 
         return {
             **state,
@@ -224,6 +270,13 @@ User question:
         self,
         state: AgentState,
     ) -> AgentState:
+
+        state["execution_steps"].append("generate")
+        state["workflow"]["llm"] = {
+            
+            "status": "running",
+            "provider": "OpenRouter",
+        }
 
         print("\nDEBUG generate_node state:")
         print(state)
@@ -273,6 +326,7 @@ User question:
         """
 
             answer = generate_response(prompt)
+            state["workflow"]["llm"]["status"] = "completed"
 
             return {
                 **state,
@@ -329,6 +383,7 @@ User question:
         """
 
             answer = generate_response(prompt)
+            state["workflow"]["llm"]["status"] = "completed"
 
             return {
                 **state,
@@ -370,6 +425,7 @@ User question:
     """
 
             answer = generate_response(prompt)
+            state["workflow"]["llm"]["status"] = "completed"
 
             return {
                 **state,
@@ -387,6 +443,7 @@ User question:
     """
 
         answer = generate_response(prompt)
+        state["workflow"]["llm"]["status"] = "completed"
 
         return {
             **state,
@@ -397,6 +454,7 @@ User question:
         state: AgentState,
     ) -> AgentState:
 
+        state["execution_steps"].append("combined")
         # Retrieve company information from RAG
         rag_state = self.retrieve_node(state)
 
@@ -412,6 +470,8 @@ User question:
         self,
         state: AgentState,
     ) -> AgentState:
+
+        state["execution_steps"].append("direct")
 
         question = state["question"]
 
@@ -544,10 +604,151 @@ Answer:
                     "route": "",
                     "employee_data": {},
                     "employee_name": None,
+                    "execution_steps": [],
+                    "workflow": {},
                 }
             )
 
             return result["answer"]
+    @observe(
+        name="enterprise_ai_agent",
+        as_type="agent",
+    )
+    def ask_with_details(
+        self,
+        question: str,
+    ) -> AgentState:
+
+        with propagate_attributes(
+            trace_name="enterprise_ai_agent",
+            metadata={
+                "workflow": "rag_mcp_langgraph",
+            },
+            tags=[
+                "langgraph",
+                "rag",
+                "mcp",
+                "llm",
+            ],
+        ):
+
+            result = self.graph.invoke(
+                {
+                    "question": question,
+                    "context": "",
+                    "answer": "",
+                    "route": "",
+                    "employee_data": {},
+                    "employee_name": None,
+                    "rag_query": None,
+                    "execution_steps": [],
+                    "workflow": {},
+                }
+            )
+
+            # Get the actual Langfuse trace
+            langfuse = get_client()
+
+            trace_id = langfuse.get_current_trace_id()
+            trace_url = langfuse.get_trace_url(
+                trace_id=trace_id
+            )
+
+            # Make sure the trace data has been sent
+            langfuse.flush()
+
+            # Retrieve observations belonging to this trace
+            observations = (
+                langfuse.api.observations.get_many(
+                    trace_id=trace_id,
+                    limit=100,
+                    fields="core,basic,usage",
+                )
+            )
+
+            observation_items = getattr(
+                observations,
+                "data",
+                observations,
+            )
+
+            llm_calls = 0
+            rag_retrievals = 0
+            validation_calls = 0
+
+            timestamps = []
+
+            for observation in observation_items:
+
+                name = getattr(
+                    observation,
+                    "name",
+                    "",
+                )
+
+                observation_type = getattr(
+                    observation,
+                    "type",
+                    "",
+                )
+
+                start_time = getattr(
+                    observation,
+                    "start_time",
+                    None,
+                )
+
+                end_time = getattr(
+                    observation,
+                    "end_time",
+                    None,
+                )
+
+                if start_time:
+                    timestamps.append(start_time)
+
+                if end_time:
+                    timestamps.append(end_time)
+
+                # Count actual LLM observations
+                if (
+                    observation_type == "GENERATION"
+                    or name.startswith("llm_")
+                ):
+                    llm_calls += 1
+
+                # Count actual RAG retrieval observations
+                if name == "rag_retrieval":
+                    rag_retrievals += 1
+
+                # Count actual validation observations
+                if name == "response_validation":
+                    validation_calls += 1
+
+            duration_seconds = None
+
+            if len(timestamps) >= 2:
+                start_time = min(timestamps)
+                end_time = max(timestamps)
+
+                duration_seconds = (
+                    end_time - start_time
+                ).total_seconds()
+
+            result["workflow"]["langfuse"] = {
+                "status": "completed",
+                "trace_id": trace_id,
+                "trace_name": "enterprise_ai_agent",
+                "trace_url": trace_url,
+                "llm_calls": llm_calls,
+                "rag_retrievals": rag_retrievals,
+                "mcp_calls": 0,
+                "validation_calls": validation_calls,
+                "duration_seconds": duration_seconds,
+            }
+
+            return result
+
     def run_for_evaluation(
         self,
         question: str,
@@ -561,6 +762,8 @@ Answer:
                 "route": "",
                 "employee_data": {},
                 "employee_name": None,
+                "execution_steps": [],
+                "workflow": {},
             }
         )
 

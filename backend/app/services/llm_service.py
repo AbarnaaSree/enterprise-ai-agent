@@ -29,7 +29,7 @@ def generate_response(prompt: str) -> str:
                 "content": prompt,
             }
         ],
-        max_tokens=1000,
+        max_tokens=450,
     )
 
     message = response.choices[0].message

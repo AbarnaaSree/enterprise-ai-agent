@@ -97,8 +97,10 @@ class ResponseValidator:
         # -------------------------------------------------
 
         extraction_prompt = f"""
-You are extracting factual claims from an
-enterprise employee-data response.
+You are validating an enterprise AI assistant response.
+
+Your task is to extract ONLY facts about the specific employee
+that come from the trusted employee database.
 
 Trusted employee data:
 
@@ -108,23 +110,81 @@ Generated answer:
 
 {answer}
 
-Identify only the employee-data facts that the
-generated answer explicitly claims.
+IMPORTANT DISTINCTION:
 
-For every claim:
+The generated answer may contain TWO types of information:
 
-- field must be one of the fields present in
-  the trusted employee data.
-- claimed_value must contain the value stated
-  by the generated answer.
-- Do not invent claims.
-- Do not infer information that is not explicitly
-  stated.
-- Ignore company policies.
-- Ignore general explanations.
-- Ignore opinions.
+1. EMPLOYEE-SPECIFIC FACTS
+   These describe the specific employee and must be checked
+   against the trusted employee database.
 
-Return only the structured response.
+   Example:
+   "Abarnaa has 12 days of leave remaining."
+
+   This is an employee-specific fact.
+
+2. COMPANY POLICY / GENERAL INFORMATION
+   These describe company-wide rules or policies and must NOT
+   be checked against the employee database.
+
+   Examples:
+   "Employees receive 18 days of annual leave per year."
+   "Leave requests should be submitted 3 working days in advance."
+   "Emergency leave does not require advance notice."
+
+   These are NOT employee database claims.
+
+CRITICAL RULE:
+
+Do NOT interpret a company-policy value as an employee value.
+
+For example, if the answer says:
+
+"Abarnaa has 12 days remaining. Employees receive 18 days
+of annual leave per year."
+
+Extract ONLY:
+
+{{
+  "field": "leave_balance",
+  "claimed_value": "12"
+}}
+
+Do NOT extract:
+
+{{
+  "field": "leave_balance",
+  "claimed_value": "18"
+}}
+
+Only extract a claim when the answer clearly states that
+the value belongs to the specific employee.
+
+Additional rules:
+
+- field must be one of the fields in the trusted employee data.
+- claimed_value must be the value explicitly stated for that employee.
+- Do not infer values.
+- Do not extract company policies.
+- Do not extract general rules.
+- Do not extract general eligibility information.
+- Do not extract annual entitlement unless it is explicitly
+  stated as this employee's personal entitlement.
+- Ignore opinions and explanations.
+- If there are no employee-specific claims, return an empty claims array.
+
+Return exactly this JSON structure:
+
+{{
+  "claims": [
+    {{
+      "field": "leave_balance",
+      "claimed_value": "12"
+    }}
+  ]
+}}
+
+The top-level response MUST be an object containing a "claims" array.
 """
 
         try:
